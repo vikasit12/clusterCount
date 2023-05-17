@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-        clustercount := make(map[string]string)
+        clustercount := make(map[string]int64)
 	// Iterate over each namespace.
 	for _, namespace := range namespaceList.Items {
 		namespaceName := namespace.Name
@@ -56,12 +56,16 @@ func main() {
 			continue
 		}
 		if count > 1 {
-		        clustercount[namespaceName] = count
+		        clustercount[namespaceName] = count - 1
 			log.Printf("Namespace %s has count of %d in collection %s", namespaceName, count, collectionName)
 		}
 
 	}
-	log.Printf(clustercount)
+	log.Printf("Total %d customers have added clusters", len(clustercount))
+	for key, value := range clustercount {
+		log.Printf("%s has attached %d clusters apart from test-cluster", key, value)
+	}
+	return
 }
 
 func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, passwordKey string) (string, error) {
