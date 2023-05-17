@@ -1,4 +1,4 @@
-module migrateDB
+module clusterCount
 
 go 1.19
 
