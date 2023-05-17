@@ -42,7 +42,7 @@ func main() {
 		}
 
 		// Connect to the MongoDB pod in the namespace.
-		srcClient, err := connectMongoDB("pxc-backup-mongodb-headless", password, namespaceName)
+		srcClient, err := connectMongoDB("pxc-backup-mongodb-headless", namespaceName, password)
 		if err != nil {
 			log.Printf("Failed to connect to MongoDB in namespace %s: %v", namespaceName, err)
 			continue
@@ -76,13 +76,14 @@ func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, pass
 
 func connectMongoDB(svcname, namespace, password string) (*mongo.Client, error) {
 	// Set MongoDB connection URI
-	uri := fmt.Sprintf("mongodb+srv://root:%s@%s.%s.svc.cluster.local/tls=false?", password, svcname, namespace)
+	uri := fmt.Sprintf("mongodb+srv://%s.%s.svc.cluster.local/tls=false?", svcname, namespace)
 
 	// Set connection options
 	clientOptions := options.Client().ApplyURI(uri)
-	// clientOptions.SetAuth(options.Credential{
-	// 	Username: "root",
-	// })
+	clientOptions.SetAuth(options.Credential{
+	 	Username: "root",
+		PasswordSet: password,
+	})
 
 	// Create a new MongoDB client
 	client, err := mongo.Connect(context.TODO(), clientOptions)
