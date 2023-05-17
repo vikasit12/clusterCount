@@ -76,7 +76,7 @@ func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, pass
 
 func connectMongoDB(svcname, namespace, password string) (*mongo.Client, error) {
 	// Set MongoDB connection URI
-	uri := fmt.Sprintf("mongodb+srv://%s.%s.svc.cluster.local/tls=false?", svcname, namespace)
+	uri := fmt.Sprintf("mongodb+srv://%s.%s.svc.cluster.local/?authSource=px-backup&replicaSet=rs0&tls=false", svcname, namespace)
 
 	// Set connection options
 	clientOptions := options.Client().ApplyURI(uri)
