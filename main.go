@@ -30,19 +30,21 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-
+        clustercount := make(map[string]string)
 	// Iterate over each namespace.
 	for _, namespace := range namespaceList.Items {
 		namespaceName := namespace.Name
 		// Get the MongoDB auth details for the namespace.
-		password, err := getSecretValue(clientset, namespaceName, "pxc-backup-mongodb", "mongodb-root-password")
+		password, err := getSecretValue(clientset, namespaceName, "pxc-backup-mongodb", "mongodb-password")
+		username, err := getSecretValue(clientset, namespaceName, "pxc-backup-mongodb", "mongodb-username")
+		// fmt.Printf("Username::%s\nPassword::%s\n", username, password)
 		if err != nil {
-			log.Printf("Failed to get MongoDB password for namespace %s: %v", namespaceName, err)
+			log.Printf("Failed to get MongoDB credentials for namespace %s: %v", namespaceName, err)
 			continue
 		}
 
 		// Connect to the MongoDB pod in the namespace.
-		srcClient, err := connectMongoDB("pxc-backup-mongodb-headless", namespaceName, password)
+		srcClient, err := connectMongoDB("pxc-backup-mongodb-headless", namespaceName, password, username)
 		if err != nil {
 			log.Printf("Failed to connect to MongoDB in namespace %s: %v", namespaceName, err)
 			continue
@@ -54,10 +56,12 @@ func main() {
 			continue
 		}
 		if count > 1 {
+		        clustercount[namespaceName] = count
 			log.Printf("Namespace %s has count of %d in collection %s", namespaceName, count, collectionName)
 		}
 
 	}
+	log.Printf(clustercount)
 }
 
 func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, passwordKey string) (string, error) {
@@ -74,17 +78,12 @@ func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, pass
 	return string(passwordBytes), nil
 }
 
-func connectMongoDB(svcname, namespace, password string) (*mongo.Client, error) {
+func connectMongoDB(svcname, namespace, password, username string) (*mongo.Client, error) {
 	// Set MongoDB connection URI
-	uri := fmt.Sprintf("mongodb+srv://%s.%s.svc.cluster.local/?authSource=px-backup&replicaSet=rs0&tls=false", svcname, namespace)
-	fmt.Printf("MongoDB URI::%s!\n", uri)
+	uri := fmt.Sprintf("mongodb://%s:%s@%s.%s.svc.cluster.local:27017/?directConnection=true&authSource=px-backup&readPreference=primaryPreferred", username, password, svcname, namespace)
 
 	// Set connection options
 	clientOptions := options.Client().ApplyURI(uri)
-	clientOptions.SetAuth(options.Credential{
-	 	Username: "root",
-		Password: password,
-	})
 
 	// Create a new MongoDB client
 	client, err := mongo.Connect(context.TODO(), clientOptions)
@@ -98,7 +97,7 @@ func connectMongoDB(svcname, namespace, password string) (*mongo.Client, error) 
 		return nil, err
 	}
 
-	fmt.Printf("Connected to MongoDB of namespace::%s!\n", namespace)
+	log.Printf("Connected to MongoDB of namespace::%s!\n", namespace)
 	return client, nil
 }
 
