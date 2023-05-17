@@ -82,7 +82,7 @@ func connectMongoDB(svcname, namespace, password string) (*mongo.Client, error) 
 	clientOptions := options.Client().ApplyURI(uri)
 	clientOptions.SetAuth(options.Credential{
 	 	Username: "root",
-		PasswordSet: password,
+		Password: password,
 	})
 
 	// Create a new MongoDB client
