@@ -8,6 +8,7 @@ import (
 
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
+	"go.mongodb.org/mongo-driver/bson"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -55,14 +56,14 @@ func main() {
 			log.Printf("Error getting count of collection %s in namespace %s: %v", collectionName, namespaceName, err)
 			continue
 		}
-		if count > 1 {
-		        clustercount[namespaceName] = count - 1
+		if count > 0 {
+		        clustercount[namespaceName] = count
 		}
 
 	}
-	log.Printf("Total %d customers have added clusters", len(clustercount))
+	log.Printf("Total %d customers have added clusters after Private IP release", len(clustercount))
 	for key, value := range clustercount {
-		log.Printf("%s has attached %d clusters apart from test-cluster", key, value)
+		log.Printf("%s has attached %d clusters", key, value)
 	}
 	return
 }
@@ -111,8 +112,15 @@ func attachedClusterCount(mongoClient *mongo.Client, dbName, collectionName stri
 	// Set up the context
 	ctx := context.TODO()
 
+	// Filter definition
+	filter := bson.M{
+		"clusterInfo.teleportClusterId": bson.M{"$exists": true},
+		"clusterInfo.status.status":   "Success",
+		"metadata.name":     bson.M{"$ne": "testdrive-cluster"},
+	}
+
 	// Count the documents in the collection
-	count, err := collection.EstimatedDocumentCount(ctx)
+	count, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
 		return 0, err
 	}
