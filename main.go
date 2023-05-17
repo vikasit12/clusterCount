@@ -57,7 +57,6 @@ func main() {
 		}
 		if count > 1 {
 		        clustercount[namespaceName] = count - 1
-			log.Printf("Namespace %s has count of %d in collection %s", namespaceName, count, collectionName)
 		}
 
 	}
@@ -113,7 +112,7 @@ func attachedClusterCount(mongoClient *mongo.Client, dbName, collectionName stri
 	ctx := context.TODO()
 
 	// Count the documents in the collection
-	count, err := collection.CountDocuments(ctx, nil)
+	count, err := collection.EstimatedDocumentCount(ctx)
 	if err != nil {
 		return 0, err
 	}
