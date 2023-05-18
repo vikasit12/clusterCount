@@ -5,10 +5,11 @@ import (
 	"fmt"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
+	"time"
 
+	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
-	"go.mongodb.org/mongo-driver/bson"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 )
@@ -41,7 +42,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-        clustercount := make(map[string]*ClusterDetails{})
+	clustercount := make(map[string]ClusterDetails)
 	// Iterate over each namespace.
 	for _, namespace := range namespaceList.Items {
 		namespaceName := namespace.Name
@@ -67,7 +68,7 @@ func main() {
 			continue
 		}
 		if clusterDetails.Count > 0 {
-		        clustercount[namespaceName] = clusterDetails
+			clustercount[namespaceName] = clusterDetails
 		}
 
 	}
@@ -115,7 +116,7 @@ func connectMongoDB(svcname, namespace, password, username string) (*mongo.Clien
 	return client, nil
 }
 
-func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName string) (*ClusterDetails, error) {
+func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName string) (ClusterDetails, error) {
 	// Access the specified database and collection
 	collection := mongoClient.Database(dbName).Collection(collectionName)
 
@@ -125,8 +126,8 @@ func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName st
 	// Filter definition
 	filter := bson.M{
 		"clusterInfo.teleportClusterId": bson.M{"$exists": true},
-		"clusterInfo.status.status":   "Success",
-		"metadata.name":     bson.M{"$ne": "testdrive-cluster"},
+		"clusterInfo.status.status":     "Success",
+		"metadata.name":                 bson.M{"$ne": "testdrive-cluster"},
 	}
 
 	// Count documents
@@ -140,7 +141,12 @@ func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName st
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer cursor.Close(ctx)
+	defer func(cursor *mongo.Cursor, ctx context.Context) {
+		err := cursor.Close(ctx)
+		if err != nil {
+			log.Fatal(err)	
+		}
+	}(cursor, ctx)
 
 	// Prepare result
 	var clusterObjects []ClusterObject
