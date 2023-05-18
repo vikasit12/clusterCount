@@ -13,6 +13,16 @@ import (
 	"k8s.io/client-go/rest"
 )
 
+type ClusterDetails struct {
+	Count          int
+	ClusterObjects []ClusterObject
+}
+
+type ClusterObject struct {
+	Name       string
+	CreateTime time.Time
+}
+
 func main() {
 	// Get the Kubernetes client configuration.
 	config, err := rest.InClusterConfig()
@@ -31,7 +41,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-        clustercount := make(map[string]int64)
+        clustercount := make(map[string]*ClusterDetails{})
 	// Iterate over each namespace.
 	for _, namespace := range namespaceList.Items {
 		namespaceName := namespace.Name
@@ -51,19 +61,19 @@ func main() {
 			continue
 		}
 		collectionName := "clusterobjects"
-		count, err := attachedClusterCount(srcClient, "px-backup", collectionName)
+		clusterDetails, err := attachedClusterDetails(srcClient, "px-backup", collectionName)
 		if err != nil {
-			log.Printf("Error getting count of collection %s in namespace %s: %v", collectionName, namespaceName, err)
+			log.Printf("Error getting details of collection %s in namespace %s: %v", collectionName, namespaceName, err)
 			continue
 		}
-		if count > 0 {
-		        clustercount[namespaceName] = count
+		if clusterDetails.Count > 0 {
+		        clustercount[namespaceName] = clusterDetails
 		}
 
 	}
 	log.Printf("Total %d customers have added clusters after Private IP release", len(clustercount))
 	for key, value := range clustercount {
-		log.Printf("%s has attached %d clusters", key, value)
+		log.Printf("%s has attached %+v cluster details", key, value)
 	}
 	return
 }
@@ -105,7 +115,7 @@ func connectMongoDB(svcname, namespace, password, username string) (*mongo.Clien
 	return client, nil
 }
 
-func attachedClusterCount(mongoClient *mongo.Client, dbName, collectionName string) (int64, error) {
+func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName string) (*ClusterDetails, error) {
 	// Access the specified database and collection
 	collection := mongoClient.Database(dbName).Collection(collectionName)
 
@@ -119,11 +129,34 @@ func attachedClusterCount(mongoClient *mongo.Client, dbName, collectionName stri
 		"metadata.name":     bson.M{"$ne": "testdrive-cluster"},
 	}
 
-	// Count the documents in the collection
+	// Count documents
 	count, err := collection.CountDocuments(ctx, filter)
 	if err != nil {
-		return 0, err
+		log.Fatal(err)
 	}
 
-	return count, nil
+	// Retrieve documents
+	cursor, err := collection.Find(ctx, filter)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer cursor.Close(ctx)
+
+	// Prepare result
+	var clusterObjects []ClusterObject
+	for cursor.Next(ctx) {
+		var obj ClusterObject
+		err := cursor.Decode(&obj)
+		if err != nil {
+			log.Fatal(err)
+		}
+		clusterObjects = append(clusterObjects, obj)
+	}
+
+	// Create and print ClusterDetails struct
+	clusterDetails := ClusterDetails{
+		Count:          int(count),
+		ClusterObjects: clusterObjects,
+	}
+	return clusterDetails, nil
 }
