@@ -3,10 +3,13 @@ package main
 import (
 	"context"
 	"fmt"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"log"
+	"os"
 	"time"
 
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/tealeg/xlsx"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
@@ -15,13 +18,13 @@ import (
 )
 
 type ClusterDetails struct {
-	Count          int
-	ClusterObjects []ClusterObject
+	Count       int
+	ClusterInfo []ClusterIn
 }
 
-type ClusterObject struct {
-	Name       string
-	CreateTime time.Time
+type ClusterIn struct {
+	Status     string `bson:"clusterInfo.status.status"`
+	CreateTime string `bson:"metadata.createTime"`
 }
 
 func main() {
@@ -43,17 +46,22 @@ func main() {
 		log.Fatal(err)
 	}
 	clustercount := make(map[string]ClusterDetails)
+	pastclustercount := make(map[string]ClusterDetails)
 	// Iterate over each namespace.
 	for _, namespace := range namespaceList.Items {
 		namespaceName := namespace.Name
 		// Get the MongoDB auth details for the namespace.
 		password, err := getSecretValue(clientset, namespaceName, "pxc-backup-mongodb", "mongodb-password")
-		username, err := getSecretValue(clientset, namespaceName, "pxc-backup-mongodb", "mongodb-username")
-		// fmt.Printf("Username::%s\nPassword::%s\n", username, password)
 		if err != nil {
-			log.Printf("Failed to get MongoDB credentials for namespace %s: %v", namespaceName, err)
+			log.Printf("Failed to get MongoDB password for namespace %s: %v", namespaceName, err)
 			continue
 		}
+		username, err := getSecretValue(clientset, namespaceName, "pxc-backup-mongodb", "mongodb-username")
+		if err != nil {
+			log.Printf("Failed to get MongoDB username for namespace %s: %v", namespaceName, err)
+			continue
+		}
+		// fmt.Printf("Username::%s\nPassword::%s\n", username, password)
 
 		// Connect to the MongoDB pod in the namespace.
 		srcClient, err := connectMongoDB("pxc-backup-mongodb-headless", namespaceName, password, username)
@@ -62,7 +70,7 @@ func main() {
 			continue
 		}
 		collectionName := "clusterobjects"
-		clusterDetails, err := attachedClusterDetails(srcClient, "px-backup", collectionName)
+		clusterDetails, err := attachedClusterDetails(srcClient, true, "px-backup", collectionName)
 		if err != nil {
 			log.Printf("Error getting details of collection %s in namespace %s: %v", collectionName, namespaceName, err)
 			continue
@@ -70,13 +78,27 @@ func main() {
 		if clusterDetails.Count > 0 {
 			clustercount[namespaceName] = clusterDetails
 		}
+		pastClusterDetails, err := attachedClusterDetails(srcClient, false, "px-backup", collectionName)
+		if err != nil {
+			log.Printf("Error getting details of collection %s in namespace %s: %v", collectionName, namespaceName, err)
+			continue
+		}
+		if pastClusterDetails.Count > 0 {
+			pastclustercount[namespaceName] = pastClusterDetails
 
+		}
 	}
-	log.Printf("Total %d customers have added clusters after Private IP release", len(clustercount))
-	for key, value := range clustercount {
-		log.Printf("%s has attached %+v cluster details", key, value)
+	fmt.Printf("Total %d customers have added clusters after Private IP release\n", len(clustercount))
+	fmt.Printf("Total %d customers have added clusters before Private IP release\n", len(pastclustercount))
+	err = writeMapToCSV("cluster.xlsx", "pvtIP", clustercount)
+	if err != nil {
+		log.Printf("Writing to CSV failed due to::%s!\n", err)
 	}
-	return
+	err = writeMapToCSV("cluster.xlsx", "Non-pvtIP", pastclustercount)
+	if err != nil {
+		log.Printf("Writing to CSV failed due to::%s!\n", err)
+	}
+	time.Sleep(10000)
 }
 
 func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, passwordKey string) (string, error) {
@@ -116,7 +138,7 @@ func connectMongoDB(svcname, namespace, password, username string) (*mongo.Clien
 	return client, nil
 }
 
-func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName string) (ClusterDetails, error) {
+func attachedClusterDetails(mongoClient *mongo.Client, boolVal bool, dbName, collectionName string) (ClusterDetails, error) {
 	// Access the specified database and collection
 	collection := mongoClient.Database(dbName).Collection(collectionName)
 
@@ -125,8 +147,7 @@ func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName st
 
 	// Filter definition
 	filter := bson.M{
-		"clusterInfo.teleportClusterId": bson.M{"$exists": true},
-		"clusterInfo.status.status":     "Success",
+		"clusterInfo.teleportClusterId": bson.M{"$exists": boolVal},
 		"metadata.name":                 bson.M{"$ne": "testdrive-cluster"},
 	}
 
@@ -144,25 +165,81 @@ func attachedClusterDetails(mongoClient *mongo.Client, dbName, collectionName st
 	defer func(cursor *mongo.Cursor, ctx context.Context) {
 		err := cursor.Close(ctx)
 		if err != nil {
-			log.Fatal(err)	
+			log.Fatal(err)
 		}
 	}(cursor, ctx)
 
 	// Prepare result
-	var clusterObjects []ClusterObject
+	var data []ClusterIn
+	var value ClusterIn
 	for cursor.Next(ctx) {
-		var obj ClusterObject
-		err := cursor.Decode(&obj)
+		var doc map[string]interface{}
+		err := cursor.Decode(&doc)
 		if err != nil {
 			log.Fatal(err)
 		}
-		clusterObjects = append(clusterObjects, obj)
+		metadata := doc["metadata"].(map[string]interface{})
+		value.CreateTime = fmt.Sprint(metadata["createTime"])
+		clusterInfo := doc["clusterInfo"].(map[string]interface{})["status"].(map[string]interface{})
+		value.Status = fmt.Sprint(clusterInfo["status"])
+		data = append(data, value)
 	}
 
 	// Create and print ClusterDetails struct
 	clusterDetails := ClusterDetails{
-		Count:          int(count),
-		ClusterObjects: clusterObjects,
+		Count:       int(count),
+		ClusterInfo: data,
 	}
 	return clusterDetails, nil
+}
+
+func writeMapToCSV(filename, sheetName string, data map[string]ClusterDetails) error {
+	_, err := os.Stat(filename)
+	fileExists := !os.IsNotExist(err)
+
+	var file *xlsx.File
+	var sheet *xlsx.Sheet
+
+	if fileExists {
+		file, err = xlsx.OpenFile(filename)
+		if err != nil {
+			return err
+		}
+
+		sheet, err = file.AddSheet(sheetName)
+		if err != nil {
+			return err
+		}
+	} else {
+		file = xlsx.NewFile()
+		sheet, err = file.AddSheet(sheetName)
+		if err != nil {
+			return err
+		}
+
+		// Write header
+		headerRow := sheet.AddRow()
+		headerRow.AddCell().Value = "NameSpace"
+		headerRow.AddCell().Value = "ClusterCount"
+		headerRow.AddCell().Value = "Status"
+		headerRow.AddCell().Value = "CreationTime"
+	}
+
+	// Write data
+	for ns, cluster := range data {
+		for _, details := range cluster.ClusterInfo {
+			row := sheet.AddRow()
+			row.AddCell().Value = ns
+			row.AddCell().Value = fmt.Sprintf("%d", cluster.Count)
+			row.AddCell().Value = details.Status
+			row.AddCell().Value = details.CreateTime
+		}
+	}
+
+	err = file.Save(filename)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
