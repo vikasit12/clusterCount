@@ -90,6 +90,16 @@ func main() {
 	}
 	fmt.Printf("Total %d customers have added clusters after Private IP release\n", len(clustercount))
 	fmt.Printf("Total %d customers have added clusters before Private IP release\n", len(pastclustercount))
+	for ns, cluster := range clustercount {
+		for _, details := range cluster.ClusterInfo {
+			fmt.Printf("%s namespace has cluster count %d and status is %s for create time %s", ns, cluster.Count, details.Status, details.CreateTime)
+		}
+	}
+	for ns1, cluster1 := range pastclustercount {
+		for _, details1 := range cluster1.ClusterInfo {
+			fmt.Printf("%s namespace has cluster count %d and status is %s for create time %s", ns1, cluster1.Count, details1.Status, details1.CreateTime)
+		}
+	}
 	err = writeMapToCSV("cluster.xlsx", "pvtIP", clustercount)
 	if err != nil {
 		log.Printf("Writing to CSV failed due to::%s!", err)
