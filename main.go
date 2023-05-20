@@ -92,13 +92,17 @@ func main() {
 	fmt.Printf("Total %d customers have added clusters before Private IP release\n", len(pastclustercount))
 	err = writeMapToCSV("cluster.xlsx", "pvtIP", clustercount)
 	if err != nil {
-		log.Printf("Writing to CSV failed due to::%s!\n", err)
+		log.Printf("Writing to CSV failed due to::%s!", err)
 	}
+	log.Printf("Wrote to CSV file for clusters after Private IP release")
 	err = writeMapToCSV("cluster.xlsx", "Non-pvtIP", pastclustercount)
 	if err != nil {
-		log.Printf("Writing to CSV failed due to::%s!\n", err)
+		log.Printf("Writing to CSV failed due to::%s!", err)
 	}
-	time.Sleep(10000)
+	log.Printf("Wrote to CSV file for clusters before Private IP release")
+	for {
+        time.Sleep(10 * time.Second)
+    }
 }
 
 func getSecretValue(clientset *kubernetes.Clientset, namespace, secretName, passwordKey string) (string, error) {
