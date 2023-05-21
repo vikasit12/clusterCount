@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -9,6 +10,9 @@ import (
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3"
 	"github.com/tealeg/xlsx"
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -90,16 +94,6 @@ func main() {
 	}
 	fmt.Printf("Total %d customers have added clusters after Private IP release\n", len(clustercount))
 	fmt.Printf("Total %d customers have added clusters before Private IP release\n", len(pastclustercount))
-	for ns, cluster := range clustercount {
-		for _, details := range cluster.ClusterInfo {
-			fmt.Printf("%s namespace has cluster count %d and status is %s for create time %s", ns, cluster.Count, details.Status, details.CreateTime)
-		}
-	}
-	for ns1, cluster1 := range pastclustercount {
-		for _, details1 := range cluster1.ClusterInfo {
-			fmt.Printf("%s namespace has cluster count %d and status is %s for create time %s", ns1, cluster1.Count, details1.Status, details1.CreateTime)
-		}
-	}
 	err = writeMapToCSV("cluster.xlsx", "pvtIP", clustercount)
 	if err != nil {
 		log.Printf("Writing to CSV failed due to::%s!", err)
@@ -110,6 +104,7 @@ func main() {
 		log.Printf("Writing to CSV failed due to::%s!", err)
 	}
 	log.Printf("Wrote to CSV file for clusters before Private IP release")
+	sendToS3()
 	for {
         time.Sleep(10 * time.Second)
     }
@@ -256,4 +251,43 @@ func writeMapToCSV(filename, sheetName string, data map[string]ClusterDetails) e
 	}
 
 	return nil
+}
+
+func sendToS3() {
+
+	sess, err := session.NewSession(&aws.Config{
+		Region: aws.String("us-west-2"), // Replace with your desired AWS region
+	})
+	if err != nil {
+		fmt.Println("Failed to create AWS session:", err)
+		return
+	}
+
+	svc := s3.New(sess)
+
+	file, err := os.Open("cluster.xlsx")
+	if err != nil {
+		fmt.Println("Failed to open file:", err)
+		return
+	}
+	defer file.Close()
+
+	fileInfo, _ := file.Stat()
+	size := fileInfo.Size()
+	buffer := make([]byte, size)
+	file.Read(buffer)
+
+	bucket := "108-test"
+	key := "cluster.xlsx"
+
+	_, err = svc.PutObject(&s3.PutObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+		Body:   bytes.NewReader(buffer),
+	})
+	if err != nil {
+		fmt.Println("Failed to upload file to S3:", err)
+		return
+	}
+	fmt.Println("File uploaded successfully!")
 }
